@@ -46,6 +46,8 @@ services:
     container_name: dcnn-coordinator
     entrypoint: ["/bin/sh", "-c", "./entry_point.sh"]
     hostname: coordinator
+    volumes:
+      - ./data:/app/data
     ports:
       - "8000:8000"
     networks:

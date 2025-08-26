@@ -25,12 +25,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy source code
-COPY . .
-
-# Create build directory and compile using CMake
-RUN chmod +x build.sh && \
-    ./build.sh --clean && \
-    chmod +x entry_point.sh 
+COPY ./bin/. .
     
 # Expose ports that workers will use
 EXPOSE 8000 8001 8002 8003 8004
