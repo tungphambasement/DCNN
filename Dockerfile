@@ -26,6 +26,11 @@ WORKDIR /app
 
 # Copy source code
 COPY ./bin/. .
-    
+
+# Create build directory and compile using CMake
+RUN chmod +x tcpem_cpu_logger.sh  && \
+
+RUN mkdir -p /logs
+
 # Expose ports that workers will use
 EXPOSE 8000 8001 8002 8003 8004
