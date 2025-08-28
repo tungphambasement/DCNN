@@ -104,7 +104,7 @@ There are several preconfigured trainers for MNIST, CIFAR10, CIFAR100, and UJI I
 # Example: 
 ./bin/mnist_cnn_trainer
 ```
-#cpu_logger uses:
+# CPU Monitor uses:
 1. set sync or semi_async cofiguration in docker-compose.yml
 2. run ./build.sh --clean
 3. run docker compose build 
