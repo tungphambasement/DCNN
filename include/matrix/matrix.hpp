@@ -35,7 +35,7 @@ private:
     }
     
     
-    std::memset(ptr, 0, bytes);
+    // std::memset(ptr, 0, bytes);
     return static_cast<T*>(ptr);
   }
   
@@ -276,14 +276,15 @@ public:
     if (initialdata_ != nullptr) {
       memcpy(data_, initialdata_, rows_ * cols_ * sizeof(T));
     } else {
-      
-      
     }
   }
 
-  Matrix(const Matrix &other)
-      : rows_(other.rows_), cols_(other.cols_) {
-    data_ = allocate_aligned(rows_ * cols_);
+  Matrix(const Matrix &other) {
+    if(this->size() != other.size()){
+      deallocate_aligned(this->data_);
+    }
+    this->rows_ = other.rows_;
+    this->cols_ = other.cols_;
     memcpy(data_, other.data_, rows_ * cols_ * sizeof(T));
   }
 
@@ -523,18 +524,10 @@ public:
     return result;
   }
 
-  inline Matrix &operator=(const Matrix &other) {
-    if (this != &other) {
-      if (rows_ * cols_ != other.rows_ * other.cols_) {
-        deallocate_aligned(data_);
-        data_ = allocate_aligned(other.rows_ * other.cols_);
-      }
-      rows_ = other.rows_;
-      cols_ = other.cols_;
+  inline Matrix &operator=(const Matrix &other) = delete;
 
-      memcpy(data_, other.data_, rows_ * cols_ * sizeof(T));
-    }
-    return *this;
+  Matrix<T> clone() const {
+    return Matrix(rows_, cols_, data_);
   }
 
   Matrix transpose() const {

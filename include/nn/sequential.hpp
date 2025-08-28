@@ -16,7 +16,7 @@
 
 namespace tnn {
 
-// Sequential model for layers
+
 template <typename T = float> class Sequential {
 private:
   std::vector<std::unique_ptr<Layer<T>>> layers_;
@@ -25,19 +25,33 @@ private:
   std::unique_ptr<Loss<T>> loss_ = nullptr;
   bool is_training_;
 
-  // Cache for intermediate outputs during forward pass (useful for debugging)
-  std::vector<Tensor<T>> layer_outputs_;
-
-  // Performance profiling
+  
   bool enable_profiling_;
   std::map<std::string, double> forward_times_ms_;
   std::map<std::string, double> backward_times_ms_;
+  
+  // just a helper function to set optimizers of all layers when the model's optimizer is set or changed
+  void distribute_optimizer_to_layers() {
+    if (!optimizer_) {
+      return;
+    }
+    
+    for (auto &layer : layers_) {
+      if (layer->has_parameters()) {
+        
+        auto* param_layer = dynamic_cast<ParameterizedLayer<T>*>(layer.get());
+        if (param_layer) {
+          param_layer->set_optimizer(optimizer_->clone());
+        }
+      }
+    }
+  }
 
 public:
   explicit Sequential(const std::string &name = "sequential")
       : name_(name), is_training_(true), enable_profiling_(false) {}
 
-  // Copy constructor (deep copy)
+  
   Sequential(const Sequential &other)
       : name_(other.name_), is_training_(other.is_training_),
         enable_profiling_(other.enable_profiling_) {
@@ -46,23 +60,24 @@ public:
     }
     if (other.optimizer_) {
       optimizer_ = other.optimizer_->clone();
+      distribute_optimizer_to_layers();
     }
     if (other.loss_) {
       loss_ = other.loss_->clone();
     }
   }
 
-  // Move constructor
+  
   Sequential(Sequential &&other) noexcept
       : layers_(std::move(other.layers_)), name_(std::move(other.name_)),
         optimizer_(std::move(other.optimizer_)), loss_(std::move(other.loss_)),
         is_training_(other.is_training_),
-        // layer_outputs_(std::move(other.layer_outputs_)),
+        
         enable_profiling_(other.enable_profiling_),
         forward_times_ms_(std::move(other.forward_times_ms_)),
         backward_times_ms_(std::move(other.backward_times_ms_)) {}
 
-  // Assignment operators
+  
   Sequential &operator=(const Sequential &other) {
     if (this != &other) {
       layers_.clear();
@@ -70,11 +85,14 @@ public:
         layers_.push_back(layer->clone());
       }
       optimizer_ = other.optimizer_ ? other.optimizer_->clone() : nullptr;
+      if (optimizer_) {
+        distribute_optimizer_to_layers();
+      }
       loss_ = other.loss_ ? other.loss_->clone() : nullptr;
       name_ = other.name_;
       is_training_ = other.is_training_;
       enable_profiling_ = other.enable_profiling_;
-      // layer_outputs_.clear();
+      
       forward_times_ms_.clear();
       backward_times_ms_.clear();
     }
@@ -88,7 +106,7 @@ public:
       loss_ = std::move(other.loss_);
       name_ = std::move(other.name_);
       is_training_ = other.is_training_;
-      // layer_outputs_ = std::move(other.layer_outputs_);
+      
       enable_profiling_ = other.enable_profiling_;
       forward_times_ms_ = std::move(other.forward_times_ms_);
       backward_times_ms_ = std::move(other.backward_times_ms_);
@@ -96,12 +114,21 @@ public:
     return *this;
   }
 
-  // Layer management
+  
   void add(std::unique_ptr<Layer<T>> layer) {
     if (!layer) {
       throw std::invalid_argument("Cannot add null layer");
     }
     layer->set_training(is_training_);
+    
+    
+    if (optimizer_ && layer->has_parameters()) {
+      auto* param_layer = dynamic_cast<ParameterizedLayer<T>*>(layer.get());
+      if (param_layer) {
+        param_layer->set_optimizer(optimizer_->clone());
+      }
+    }
+    
     layers_.push_back(std::move(layer));
   }
 
@@ -119,6 +146,14 @@ public:
       throw std::out_of_range("Insert index out of range");
     }
     layer->set_training(is_training_);
+    
+    if (optimizer_ && layer->has_parameters()) {
+      auto* param_layer = dynamic_cast<ParameterizedLayer<T>*>(layer.get());
+      if (param_layer) {
+        param_layer->set_optimizer(optimizer_->clone());
+      }
+    }
+    
     layers_.insert(layers_.begin() + index, std::move(layer));
   }
 
@@ -135,7 +170,7 @@ public:
     backward_times_ms_.clear();
   }
 
-  // Access layers
+  
   Layer<T> &operator[](size_t index) {
     if (index >= layers_.size()) {
       throw std::out_of_range("Layer index out of range");
@@ -158,7 +193,7 @@ public:
 
   bool empty() const { return layers_.empty(); }
 
-  // Training mode
+  
   void set_training(bool training) {
     is_training_ = training;
     for (auto &layer : layers_) {
@@ -172,7 +207,7 @@ public:
 
   void eval() { set_training(false); }
 
-  // Performance profiling methods
+  
   void enable_profiling(bool enable = true) {
     enable_profiling_ = enable;
     if (enable) {
@@ -188,7 +223,7 @@ public:
     backward_times_ms_.clear();
   }
 
-  // Explicit functions for clearing specific timing data
+  
   void clear_forward_times() {
     forward_times_ms_.clear();
   }
@@ -197,7 +232,7 @@ public:
     backward_times_ms_.clear();
   }
 
-  // Get profiling results
+  
   const std::map<std::string, double> &get_forward_times() const {
     return forward_times_ms_;
   }
@@ -213,29 +248,26 @@ public:
       return;
     }
 
-    std::cout << "\n==========================================================="
-                 "======\n";
+    std::cout << std::string(60, '=') << "\n";
     std::cout << "Performance Profile: " << name_ << "\n";
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '=') << "\n";
     std::cout << std::left << std::setw(20) << "Layer" << std::setw(15)
               << "Forward (ms)" << std::setw(15) << "Backward (ms)"
               << std::setw(15) << "Total (ms)" << "\n";
-    std::cout << "-------------------------------------------------------------"
-                 "----\n";
+    std::cout << std::string(60, '-') << "\n";
 
     double total_forward = 0.0, total_backward = 0.0;
 
-    // Loop through layers in order
+    
     for (size_t i = 0; i < layers_.size(); ++i) {
-      // Get layer name
+      
       std::string layer_name = layers_[i]->type();
       auto config = layers_[i]->get_config();
       if (!config.name.empty()) {
         layer_name = config.name;
       }
 
-      // Look up timing data in maps
+      
       double forward_time = 0.0;
       auto forward_it = forward_times_ms_.find(layer_name);
       if (forward_it != forward_times_ms_.end()) {
@@ -260,16 +292,14 @@ public:
                 << std::fixed << std::setprecision(3) << total_time << "\n";
     }
 
-    std::cout << "-------------------------------------------------------------"
-                 "----\n";
+    std::cout << std::string(60, '-') << "\n";
     std::cout << std::left << std::setw(20) << "TOTAL" << std::setw(15)
               << std::fixed << std::setprecision(3) << total_forward
               << std::setw(15) << std::fixed << std::setprecision(3)
               << total_backward << std::setw(15) << std::fixed
               << std::setprecision(3) << (total_forward + total_backward)
               << "\n";
-    std::cout << "============================================================="
-                 "====\n\n";
+    std::cout << std::string(60, '=') << "\n\n";
   }
 
   
@@ -291,7 +321,7 @@ public:
           auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
               end_time - start_time);
 
-          // Store layer name and timing
+          
           std::string layer_name = layers_[i]->type();
           auto config = layers_[i]->get_config();
           if (!config.name.empty()) {
@@ -302,7 +332,7 @@ public:
           current_output = layers_[i]->forward(current_output, micro_batch_id);
         }
 
-        // layer_outputs_.push_back(current_output);
+        
       } catch (const std::exception &e) {
         throw std::runtime_error("Error in layer " + std::to_string(i) + " (" +
                                  layers_[i]->type() + "): " + e.what());
@@ -321,7 +351,7 @@ public:
 
     Tensor<T> current_grad = grad_output;
 
-    // Backward through layers in reverse order
+    
     for (int i = layers_.size() - 1; i >= 0; --i) {
       try {
         if (enable_profiling_) {
@@ -333,7 +363,7 @@ public:
           auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
               end_time - start_time);
 
-          // Store layer name and timing
+          
           std::string layer_name = layers_[i]->type();
           auto config = layers_[i]->get_config();
           if (!config.name.empty()) {
@@ -353,7 +383,7 @@ public:
     return current_grad;
   }
 
-  // Prediction (convenience method for inference)
+  
   Tensor<T> predict(const Tensor<T> &input) {
     bool was_training = is_training_;
     set_training(false);
@@ -362,7 +392,7 @@ public:
     return result;
   }
 
-  // Parameter management
+  
   std::vector<Tensor<T> *> parameters() const {
     std::vector<Tensor<T> *> all_params;
     for (auto &layer : layers_) {
@@ -395,7 +425,7 @@ public:
     return count;
   }
 
-  // Shape inference
+  
   std::vector<size_t>
   compute_output_shape(const std::vector<size_t> &input_shape) const {
     if (layers_.empty()) {
@@ -411,17 +441,14 @@ public:
     return current_shape;
   }
 
-  // Model information
+  
   void print_summary(const std::vector<size_t> &input_shape = {}) const {
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '=') << "\n";
     std::cout << "Model: " << name_ << "\n";
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '=') << "\n";
     std::cout << std::left << std::setw(20) << "Layer (type)" << std::setw(25)
               << "Output Shape" << std::setw(15) << "Param #" << "\n";
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '-') << "\n";
 
     std::vector<size_t> current_shape = input_shape;
     size_t total_params = 0;
@@ -429,12 +456,12 @@ public:
     for (size_t i = 0; i < layers_.size(); ++i) {
       const auto &layer = layers_[i];
 
-      // Compute output shape
+      
       if (!current_shape.empty()) {
         current_shape = layer->compute_output_shape(current_shape);
       }
 
-      // Count parameters
+      
       size_t layer_params = 0;
       if (layer->has_parameters()) {
         auto params = const_cast<Layer<T> *>(layer.get())->parameters();
@@ -444,13 +471,13 @@ public:
       }
       total_params += layer_params;
 
-      // Layer name and type
+      
       std::string layer_name = layer->type();
       if (!layer->get_config().name.empty()) {
         layer_name = layer->get_config().name + " (" + layer->type() + ")";
       }
 
-      // Output shape string
+      
       std::string shape_str = "(";
       if (!current_shape.empty()) {
         for (size_t j = 0; j < current_shape.size(); ++j) {
@@ -467,11 +494,9 @@ public:
                 << shape_str << std::setw(15) << layer_params << "\n";
     }
 
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '-') << "\n";
     std::cout << "Total params: " << total_params << "\n";
-    std::cout << "============================================================="
-                 "====\n";
+    std::cout << std::string(60, '=') << "\n";
   }
 
   void print_config() const {
@@ -479,16 +504,16 @@ public:
     std::cout << get_config().dump(2) << std::endl;
   }
 
-  // Serialization support
+  
   void save_to_file(const std::string &path) const {
-    // Use the new get_config method that includes optimizer and loss
+    
     nlohmann::json config_json = get_config();
 
     std::ofstream config_file(path + ".json");
     config_file << config_json.dump(4);
     config_file.close();
 
-    // Save weights to a binary file
+    
     std::ofstream weights_file(path + ".bin", std::ios::binary);
     for (const auto &layer : layers_) {
       if (layer->has_parameters()) {
@@ -503,7 +528,7 @@ public:
   }
 
   static Sequential<T> from_file(const std::string &path) {
-    // Load configuration from JSON using new serialization system
+    
     std::ifstream config_file(path + ".json");
     if (!config_file.is_open()) {
       throw std::runtime_error("Could not open config file: " + path +
@@ -513,10 +538,10 @@ public:
     config_file >> config_json;
     config_file.close();
 
-    // Use the new load_from_config method that handles optimizer and loss
+    
     Sequential<T> model = load_from_config(config_json);
 
-    // Load weights from binary file
+    
     std::ifstream weights_file(path + ".bin", std::ios::binary);
     if (!weights_file.is_open()) {
       throw std::runtime_error("Could not open weights file: " + path +
@@ -535,7 +560,7 @@ public:
     return model;
   }
 
-  // Serialization support (basic configuration)
+  
   std::vector<LayerConfig> get_all_configs() const {
     std::vector<LayerConfig> configs;
     configs.reserve(layers_.size());
@@ -547,7 +572,7 @@ public:
     return configs;
   }
 
-  // Static method to create from configs
+  
   static Sequential
   from_configs(const std::vector<LayerConfig> &configs,
                const std::string &name = "sequential") {
@@ -564,7 +589,7 @@ public:
     return model;
   }
 
-  // Clone the entire model
+  
   std::unique_ptr<Sequential> clone() const {
     auto cloned = std::make_unique<Sequential>(name_);
     cloned->set_training(is_training_);
@@ -576,12 +601,12 @@ public:
     return cloned;
   }
 
-  // Model name
+  
   const std::string &name() const { return name_; }
 
   void set_name(const std::string &name) { name_ = name; }
 
-  // Iterator support
+  
   auto begin() { return layers_.begin(); }
 
   auto end() { return layers_.end(); }
@@ -590,24 +615,23 @@ public:
 
   auto end() const { return layers_.end(); }
 
-  // Update all parameters using an optimizer
   void update_parameters() const {
-    auto params = parameters();
-    auto grads = gradients();
-    if (optimizer_) {
-      optimizer_->update(params, grads);
-    } else {
-      throw std::runtime_error("No optimizer set for model: " + name_); 
+    for (const auto &layer : layers_) {
+      if (layer->has_parameters()) {
+        layer->update_parameters();
+      }
     }
   }
 
   void set_optimizer(Optimizer<T> &optimizer) {
     this->optimizer_ = optimizer.clone();
+    distribute_optimizer_to_layers();
   }
   
   void set_optimizer(std::unique_ptr<Optimizer<T>> optimizer) {
     this->optimizer_ = std::move(optimizer);
-  std::cout << "Optimizer set to: " << this->optimizer_->name() << std::endl;
+    distribute_optimizer_to_layers();
+    std::cout << "Optimizer set to: " << this->optimizer_->name() << std::endl;
   }
   
   void set_loss_function(Loss<T> &loss) {
@@ -626,7 +650,7 @@ public:
     return loss_.get();
   }
 
-  // Split the model into multiple stages (Will optimize later for heterogeneous machines)
+  
   std::vector<Sequential<T>> split(size_t num_stages) const {
     if (num_stages == 0 || num_stages > layers_.size()) {
       throw std::invalid_argument("Invalid number of stages for split");
@@ -654,18 +678,18 @@ public:
     return stages;
   }
 
-  // Get all layers
+  
   const std::vector<std::unique_ptr<Layer<T>>> &get_layers() const {
     return layers_;
   }
   
-  // Serialization methods
+  
   nlohmann::json get_config() const {
     nlohmann::json config;
     config["name"] = name_;
     config["is_training"] = is_training_;
     
-    // Serialize layers
+    
     nlohmann::json layers_config = nlohmann::json::array();
     for (const auto& layer : layers_) {
       LayerConfig layer_config = layer->get_config();
@@ -674,7 +698,7 @@ public:
       layer_json["name"] = layer_config.name;
       layer_json["parameters"] = nlohmann::json::object();
       
-      // Convert std::any parameters to JSON (basic types only)
+      
       for (const auto& [key, value] : layer_config.parameters) {
         try {
           if (auto* ptr = std::any_cast<int>(&value)) {
@@ -691,14 +715,14 @@ public:
             layer_json["parameters"][key] = *ptr;
           }
         } catch (const std::bad_any_cast&) {
-          // Skip parameters that can't be serialized
+          
         }
       }
       layers_config.push_back(layer_json);
     }
     config["layers"] = layers_config;
     
-    // Serialize optimizer
+    
     if (optimizer_) {
       OptimizerConfig opt_config = optimizer_->get_config();
       nlohmann::json opt_json;
@@ -714,13 +738,13 @@ public:
             opt_json["parameters"][key] = *ptr;
           }
         } catch (const std::bad_any_cast&) {
-          // Skip parameters that can't be serialized
+          
         }
       }
       config["optimizer"] = opt_json;
     }
     
-    // Serialize loss
+    
     if (loss_) {
       LossConfig loss_config = loss_->get_config();
       nlohmann::json loss_json;
@@ -736,7 +760,7 @@ public:
             loss_json["parameters"][key] = *ptr;
           }
         } catch (const std::bad_any_cast&) {
-          // Skip parameters that can't be serialized
+          
         }
       }
       config["loss"] = loss_json;
@@ -757,7 +781,7 @@ public:
   static Sequential<T> load_from_config(const nlohmann::json& config) {
     Sequential<T> model(config.value("name", "sequential"));
     model.is_training_ = config.value("is_training", true);
-    // Load optimizer if present
+    
     if (config.contains("optimizer")) {
       OptimizerConfig opt_config;
       opt_config.type = config["optimizer"]["type"];
@@ -776,7 +800,7 @@ public:
       model.set_optimizer(OptimizerFactory<T>::create_from_config(opt_config));
     }
     
-    // Load loss if present
+    
     if (config.contains("loss")) {
       LossConfig loss_config;
       loss_config.type = config["loss"]["type"];
@@ -795,7 +819,7 @@ public:
       model.set_loss_function(LossFactory<T>::create_from_config(loss_config));
     }
     
-    // Load layers using LayerFactory
+    
     if (config.contains("layers")) {
       auto factory = LayerFactory<T>();
       factory.register_defaults();
@@ -804,7 +828,7 @@ public:
         LayerConfig layer_config;
         layer_config.name = layer_json.value("name", "");
         
-        // Convert JSON parameters back to LayerConfig parameters
+        
         if (layer_json.contains("parameters")) {
           for (const auto& [key, value] : layer_json["parameters"].items()) {
             if (value.is_number_integer()) {
@@ -842,22 +866,22 @@ public:
   }
 };
 
-// Builder pattern for easy model construction with automatic shape inference
+
 template <typename T = float> class SequentialBuilder {
 private:
   Sequential<T> model_;
   std::vector<size_t> input_shape_;
   bool input_shape_set_ = false;
 
-  // Helper function to get current shape at any point in the model
-  // Returns shape including batch dimension for proper shape computation
+  
+  
   std::vector<size_t> get_current_shape() const {
     if (!input_shape_set_) {
       throw std::runtime_error("Input shape must be set before adding layers. Use .input() method first.");
     }
     
-    // Add a dummy batch size (1) to the input shape for shape computation
-    // The actual batch size will be determined at runtime
+    
+    
     std::vector<size_t> shape_with_batch = {1};
     shape_with_batch.insert(shape_with_batch.end(), input_shape_.begin(), input_shape_.end());
     
@@ -868,8 +892,8 @@ private:
     return model_.compute_output_shape(shape_with_batch);
   }
   
-  // Helper function to get current feature count (excluding batch dimension)
-  // Used specifically for dense layers
+  
+  
   size_t get_feature_count() const {
     std::vector<size_t> current_shape = get_current_shape();
     
@@ -877,7 +901,7 @@ private:
       throw std::runtime_error("Cannot compute feature count from empty shape");
     }
     
-    // Skip the first dimension (batch size) and multiply the rest
+    
     size_t feature_count = 1;
     for (size_t i = 1; i < current_shape.size(); ++i) {
       feature_count *= current_shape[i];
@@ -890,19 +914,19 @@ public:
   explicit SequentialBuilder(const std::string &name = "sequential")
       : model_(name) {}
 
-  // Set input shape - should be called first (without batch dimension)
+  
   SequentialBuilder &input(const std::vector<size_t>& shape) {
     input_shape_ = shape;
     input_shape_set_ = true;
     return *this;
   }
 
-  // Dense layer with automatic input shape inference
+  
   SequentialBuilder &dense(size_t output_features,
                           const std::string &activation = "none",
                           bool use_bias = true,
                           const std::string &name = "") {
-    // Get input features count (excluding batch dimension)
+    
     size_t input_features = get_feature_count();
     
     auto layer = tnn::dense<T>(
@@ -912,7 +936,7 @@ public:
     return *this;
   }
 
-  // Conv2D layer with automatic input channel inference
+  
   SequentialBuilder &conv2d(size_t out_channels,
                            size_t kernel_h, size_t kernel_w,
                            size_t stride_h = 1, size_t stride_w = 1,
@@ -927,7 +951,7 @@ public:
                               std::to_string(current_shape.size()) + " dimensions.");
     }
     
-    // Shape format: [batch, channels, height, width] - take channels from index 1
+    
     size_t in_channels = current_shape[1];
     
     auto layer = tnn::conv2d<T>(
@@ -938,7 +962,7 @@ public:
     return *this;
   }
 
-  // BatchNorm with automatic feature inference
+  
   SequentialBuilder &batchnorm(T epsilon = T(1e-5), T momentum = T(0.1), 
                               bool affine = true, const std::string &name = "") {
     std::vector<size_t> current_shape = get_current_shape();
@@ -947,16 +971,16 @@ public:
       throw std::runtime_error("BatchNorm requires at least 2D input (batch, features)");
     }
     
-    // For BatchNorm, num_features is typically the channel dimension
+    
     size_t num_features;
     if (current_shape.size() == 2) {
-      // 2D case: [batch, features] - use features dimension
+      
       num_features = current_shape[1];
     } else if (current_shape.size() >= 4) {
-      // 4D case: [batch, channels, height, width] - use channels dimension
+      
       num_features = current_shape[1];
     } else {
-      // 3D case: assume [batch, channels, length] - use channels dimension
+      
       num_features = current_shape[1];
     }
     
@@ -967,7 +991,7 @@ public:
     return *this;
   }
 
-  // Layers that don't need shape inference
+  
   SequentialBuilder &activation(const std::string &activation_name,
                                const std::string &name = "") {
     auto layer = tnn::activation<T>(
@@ -1009,7 +1033,7 @@ public:
     return *this;
   }
 
-  // Build with validation
+  
   Sequential<T> build() { 
     if (!input_shape_set_) {
       throw std::runtime_error("Input shape must be set before building model. Use .input() method.");
@@ -1018,9 +1042,9 @@ public:
       throw std::runtime_error("Cannot build empty model. Add at least one layer.");
     }
     
-    // Validate that all shapes are compatible
+    
     try {
-      // Add dummy batch size for validation
+      
       std::vector<size_t> shape_with_batch = {1};
       shape_with_batch.insert(shape_with_batch.end(), input_shape_.begin(), input_shape_.end());
       
@@ -1031,7 +1055,7 @@ public:
         std::cout << input_shape_[i];
       }
       std::cout << ") -> Output shape (without batch): (";
-      // Skip batch dimension in output
+      
       for (size_t i = 1; i < output_shape.size(); ++i) {
         if (i > 1) std::cout << ", ";
         std::cout << output_shape[i];

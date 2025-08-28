@@ -3,15 +3,15 @@
 #include "data_loader.hpp"
 #include "nn/sequential.hpp"
 
-void train_cnn_model(tnn::Sequential<float> &model,
+void train_classification_model(tnn::Sequential<float> &model,
                      data_loading::BaseDataLoader<float> &train_loader,
                      data_loading::BaseDataLoader<float> &test_loader,
                      int epochs = 10, int batch_size = 32,
-                     float lr_decay_factor = 0.9f, int progress_print_interval = 100) {
+                     float lr_decay_factor = 0.9f,
+                     int progress_print_interval = 100) {
 
   Tensor<float> batch_data, batch_labels, predictions;
 
-  // Pre-compute batches for training and validation data
   std::cout << "\nPreparing training batches..." << std::endl;
   train_loader.prepare_batches(batch_size);
 
@@ -20,30 +20,26 @@ void train_cnn_model(tnn::Sequential<float> &model,
 
   std::cout << "Training batches: " << train_loader.num_batches() << std::endl;
   std::cout << "Validation batches: " << test_loader.num_batches() << std::endl;
-  std::cout << std::string(70, '=') << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
 
   for (int epoch = 0; epoch < epochs; ++epoch) {
     const auto epoch_start = std::chrono::high_resolution_clock::now();
 
-    // Training phase - shuffle data and re-prepare batches for each epoch
     model.train();
     train_loader.shuffle();
-    train_loader.prepare_batches(batch_size); // Re-prepare after shuffle
     train_loader.reset();
 
-    double total_loss = 0.0; // Use double for better numerical precision
+    double total_loss = 0.0;
     double total_accuracy = 0.0;
     int num_batches = 0;
     std::cout << "Epoch " << epoch + 1 << "/" << epochs << std::endl;
-    // Use fast batch iteration with pre-computed batches
+
     while (train_loader.get_next_batch(batch_data, batch_labels)) {
       ++num_batches;
 
-      
       predictions = model.forward(batch_data);
       utils::apply_softmax<float>(predictions);
 
-      // Compute loss and accuracy (just for monitoring)
       const float loss =
           model.loss_function()->compute_loss(predictions, batch_labels);
       const float accuracy =
@@ -52,15 +48,12 @@ void train_cnn_model(tnn::Sequential<float> &model,
       total_loss += loss;
       total_accuracy += accuracy;
 
-      
       const Tensor<float> loss_gradient =
           model.loss_function()->compute_gradient(predictions, batch_labels);
       model.backward(loss_gradient);
 
-      // Update parameters
       model.update_parameters();
 
-      // Print progress at intervals
       if (num_batches % progress_print_interval == 0) {
         model.print_profiling_summary();
         std::cout << "Batch ID: " << num_batches
@@ -70,20 +63,25 @@ void train_cnn_model(tnn::Sequential<float> &model,
       }
       model.clear_profiling_data();
     }
+    std::cout << std::endl;
 
     const float avg_train_loss = static_cast<float>(total_loss / num_batches);
     const float avg_train_accuracy =
         static_cast<float>(total_accuracy / num_batches);
 
-    // Optimized validation phase - use pre-computed batches
+    const auto epoch_end = std::chrono::high_resolution_clock::now();
+    const auto epoch_duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(epoch_end -
+                                                         epoch_start);
+
     model.eval();
     test_loader.reset();
 
+    std::cout << "Starting validation..." << std::endl;
     double val_loss = 0.0;
     double val_accuracy = 0.0;
     int val_batches = 0;
 
-    // Use fast batch iteration with pre-computed validation batches
     while (test_loader.get_next_batch(batch_data, batch_labels)) {
       predictions = model.forward(batch_data);
       utils::apply_softmax<float>(predictions);
@@ -99,24 +97,17 @@ void train_cnn_model(tnn::Sequential<float> &model,
     const float avg_val_accuracy =
         static_cast<float>(val_accuracy / val_batches);
 
-    const auto epoch_end = std::chrono::high_resolution_clock::now();
-    const auto epoch_duration =
-        std::chrono::duration_cast<std::chrono::seconds>(epoch_end -
-                                                         epoch_start);
-
-    // Print epoch summary with improved formatting
-    std::cout << std::string(70, '-') << std::endl;
+    std::cout << std::string(60, '-') << std::endl;
     std::cout << "Epoch " << epoch + 1 << "/" << epochs << " completed in "
-              << epoch_duration.count() << "s" << std::endl;
+              << epoch_duration.count() << "ms" << std::endl;
     std::cout << "Training   - Loss: " << std::fixed << std::setprecision(4)
               << avg_train_loss << ", Accuracy: " << std::setprecision(2)
               << avg_train_accuracy * 100.0f << "%" << std::endl;
     std::cout << "Validation - Loss: " << std::fixed << std::setprecision(4)
               << avg_val_loss << ", Accuracy: " << std::setprecision(2)
               << avg_val_accuracy * 100.0f << "%" << std::endl;
-    std::cout << std::string(70, '=') << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
 
-    // Learning rate decay
     if ((epoch + 1) % progress_print_interval == 0) {
       const float current_lr = model.optimizer()->get_learning_rate();
       const float new_lr = current_lr * lr_decay_factor;

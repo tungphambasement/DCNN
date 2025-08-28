@@ -37,7 +37,6 @@ private:
   mutable std::unordered_map<int, Tensor<T>> micro_batch_pre_activations_;
   mutable std::unordered_map<int, Matrix<T>> micro_batch_im2col_matrices_;
 
-  // Helper functions for convolution
   void compute_conv_forward(const T *col_data, const T *weight_data,
                            T *output_data, size_t output_size, size_t kernel_size,
                            size_t out_channels) const;
@@ -50,6 +49,14 @@ private:
                               const T *weight_data, T *col_grad_data,
                               size_t output_size, size_t kernel_size,
                               size_t out_channels) const;
+
+  void compute_bias_gradients(const T *grad_output_data, T *bias_grad_data,
+                             size_t batch_size, size_t output_h, 
+                             size_t output_w, size_t out_channels) const;
+
+  void add_bias_to_output(T *output_data, const T *bias_data,
+                         size_t batch_size, size_t output_h, size_t output_w,
+                         size_t out_channels) const;
 
 public:
   Conv2DLayer(size_t in_channels, size_t out_channels, size_t kernel_h,
@@ -72,7 +79,7 @@ public:
 protected:
   void collect_parameters(std::vector<Tensor<T> *> &params) override;
   void collect_gradients(std::vector<Tensor<T> *> &grads) override;
-  void update_parameters_impl(Optimizer<T> &optimizer) override;
+  void clear_gradients() override;
 };
 
 } // namespace tnn

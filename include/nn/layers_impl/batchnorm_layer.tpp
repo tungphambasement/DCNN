@@ -287,9 +287,9 @@ Tensor<T> BatchNormLayer<T>::backward(const Tensor<T> &grad_output,
   Tensor<T> grad_input(input.shape());
 
   if (affine_) {
-    // Initialize gradients
-    gamma_gradients_.fill(T(0));
-    beta_gradients_.fill(T(0));
+    // Don't clear gradients - accumulate across microbatches
+    // gamma_gradients_.fill(T(0));
+    // beta_gradients_.fill(T(0));
 
     // Compute gradients for gamma and beta
 #ifdef USE_TBB
@@ -307,8 +307,8 @@ Tensor<T> BatchNormLayer<T>::backward(const Tensor<T> &grad_output,
         }
       }
 
-      gamma_gradients_(c, 0, 0, 0) = gamma_grad_sum;
-      beta_gradients_(c, 0, 0, 0) = beta_grad_sum;
+      gamma_gradients_(c, 0, 0, 0) += gamma_grad_sum;
+      beta_gradients_(c, 0, 0, 0) += beta_grad_sum;
     });
 #else
 #ifdef _OPENMP
@@ -328,8 +328,8 @@ Tensor<T> BatchNormLayer<T>::backward(const Tensor<T> &grad_output,
         }
       }
 
-      gamma_gradients_(c, 0, 0, 0) = gamma_grad_sum;
-      beta_gradients_(c, 0, 0, 0) = beta_grad_sum;
+      gamma_gradients_(c, 0, 0, 0) += gamma_grad_sum;
+      beta_gradients_(c, 0, 0, 0) += beta_grad_sum;
     }
 #endif
   }
@@ -481,17 +481,6 @@ void BatchNormLayer<T>::collect_gradients(std::vector<Tensor<T> *> &grads) {
 }
 
 template <typename T>
-void BatchNormLayer<T>::update_parameters_impl(Optimizer<T> &optimizer) {
-  std::vector<Tensor<T> *> params = this->parameters();
-  std::vector<Tensor<T> *> grads = this->gradients();
-  if (params.size() != grads.size()) {
-    throw std::runtime_error(
-        "Parameter and gradient size mismatch in BatchNormLayer");
-  }
-  optimizer.update(params, grads);
-}
-
-template <typename T>
 std::unique_ptr<Layer<T>>
 BatchNormLayer<T>::create_from_config(const LayerConfig &config) {
   size_t num_features = config.get<size_t>("num_features");
@@ -501,6 +490,12 @@ BatchNormLayer<T>::create_from_config(const LayerConfig &config) {
 
   return std::make_unique<BatchNormLayer<T>>(num_features, epsilon, momentum,
                                              affine, config.name);
+}
+
+template <typename T>
+void BatchNormLayer<T>::clear_gradients() {
+  gamma_gradients_.fill(T(0));
+  beta_gradients_.fill(T(0));
 }
 
 } // namespace tnn
