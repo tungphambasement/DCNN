@@ -22,6 +22,7 @@
 
 #include "layout_trait.hpp"
 #include "matrix/matrix.hpp"
+#include "utils/ops.hpp"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -197,36 +198,37 @@ public:
     return data_[compute_index(indices...)];
   }
 
-  Tensor<T, L> operator+(const Tensor<T, L> &other) const {
+  bool same_shape(const Tensor<T, L> &other) const {
     for (size_t i = 0; i < dims_; ++i) {
       if (shape_[i] != other.shape_[i]) {
-        std::cerr << "Shape mismatch: " << shape_[i] << " vs " << other.shape_[i] << std::endl;
-        throw std::invalid_argument("Tensor shapes must match for addition");
+        return false;
       }
+    }
+    return true;
+  }
+
+  Tensor<T, L> operator+(const Tensor<T, L> &other) const {
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for addition");
     }
 
     std::vector<size_t> shape_vec(shape_, shape_ + dims_);
     Tensor<T, L> result(shape_vec);
 
-    for (size_t idx = 0; idx < data_size_; ++idx)
-      result.data_[idx] = data_[idx] + other.data_[idx];
+    utils::avx2_add(data_, other.data_, result.data_, data_size_);
 
     return result;
   }
 
   Tensor<T, L> operator-(const Tensor<T, L> &other) const {
-    for (size_t i = 0; i < dims_; ++i) {
-      if (shape_[i] != other.shape_[i]) {
-        throw std::invalid_argument("Tensor shapes must match for subtraction");
-      }
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for subtraction");
     }
 
     std::vector<size_t> shape_vec(shape_, shape_ + dims_);
     Tensor<T, L> result(shape_vec);
 
-    for (size_t idx = 0; idx < data_size_; ++idx) {
-      result.data_[idx] = data_[idx] - other.data_[idx];
-    }
+    utils::avx2_sub(data_, other.data_, result.data_, data_size_);
 
     return result;
   }
@@ -234,9 +236,9 @@ public:
   Tensor<T, L> operator*(T scalar) const {
     std::vector<size_t> shape_vec(shape_, shape_ + dims_);
     Tensor<T, L> result(shape_vec);
-    for (size_t i = 0; i < data_size_; ++i) {
-      result.data_[i] = data_[i] * scalar;
-    }
+
+    utils::avx2_mul_scalar(data_, scalar, result.data_, data_size_);
+
     return result;
   }
 
@@ -247,59 +249,46 @@ public:
 
     std::vector<size_t> shape_vec(shape_, shape_ + dims_);
     Tensor<T, L> result(shape_vec);
-    for (size_t i = 0; i < data_size_; ++i) {
-      result.data_[i] = data_[i] / scalar;
-    }
+
+    utils::avx2_div_scalar(data_, scalar, result.data_, data_size_);
+
     return result;
   }
 
   Tensor<T, L> &operator+=(const Tensor<T, L> &other) {
-    for (size_t i = 0; i < dims_; ++i) {
-      if (shape_[i] != other.shape_[i]) {
-        std::cerr << "Shape mismatch: " << shape_[i] << " vs " << other.shape_[i] << std::endl;
-        throw std::invalid_argument("Tensor shapes must match for addition");
-      }
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for addition");
     }
 
-    for (size_t idx = 0; idx < data_size_; ++idx) {
-      data_[idx] += other.data_[idx];
-    }
+    utils::avx2_add(data_, other.data_, data_, data_size_);
 
     return *this;
   }
 
   Tensor<T, L> &operator-=(const Tensor<T, L> &other) {
-    for (size_t i = 0; i < dims_; ++i) {
-      if (shape_[i] != other.shape_[i]) {
-        throw std::invalid_argument("Tensor shapes must match for subtraction");
-      }
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for subtraction");
     }
 
-    for (size_t idx = 0; idx < data_size_; ++idx) {
-      data_[idx] -= other.data_[idx];
-    }
+    utils::avx2_sub(data_, other.data_, data_, data_size_);
 
     return *this;
   }
 
   Tensor<T, L> &operator*=(const Tensor<T, L> &other) {
-    for (size_t i = 0; i < dims_; ++i) {
-      if (shape_[i] != other.shape_[i]) {
-        throw std::invalid_argument("Tensor shapes must match for element-wise multiplication");
-      }
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for element-wise multiplication");
     }
 
-    for (size_t idx = 0; idx < data_size_; ++idx) {
-      data_[idx] *= other.data_[idx];
-    }
+    utils::avx2_mul(data_, other.data_, data_, data_size_);
 
     return *this;
   }
 
   Tensor<T, L> &operator*=(T scalar) {
-    for (size_t i = 0; i < data_size_; ++i) {
-      data_[i] *= scalar;
-    }
+
+    utils::avx2_mul_scalar(data_, scalar, data_, data_size_);
+
     return *this;
   }
 
@@ -308,9 +297,8 @@ public:
       throw std::invalid_argument("Division by zero");
     }
 
-    for (size_t i = 0; i < data_size_; ++i) {
-      data_[i] /= scalar;
-    }
+    utils::avx2_div_scalar(data_, scalar, data_, data_size_);
+
     return *this;
   }
 
@@ -591,6 +579,30 @@ public:
     }
 
     return means;
+  }
+
+  void apply_softmax() {
+    const size_t batch_size = shape_[0];
+    const size_t num_classes = shape_[1];
+
+    for (size_t batch = 0; batch < batch_size; ++batch) {
+      float max_val = (*this)(batch, 0, 0, 0);
+      for (size_t j = 1; j < num_classes; ++j) {
+        max_val = std::max(max_val, (*this)(batch, j, 0, 0));
+      }
+
+      float sum = 0.0f;
+      for (size_t j = 0; j < num_classes; ++j) {
+        const float exp_val = std::exp((*this)(batch, j, 0, 0) - max_val);
+        (*this)(batch, j, 0, 0) = exp_val;
+        sum += exp_val;
+      }
+
+      const float inv_sum = 1.0f / std::max(sum, 1e-8f);
+      for (size_t j = 0; j < num_classes; ++j) {
+        (*this)(batch, j, 0, 0) *= inv_sum;
+      }
+    }
   }
 
   std::vector<Tensor<T>> split(size_t num_splits) const {

@@ -9,6 +9,7 @@
 #include "data_loading/data_loader.hpp"
 #include "nn/sequential.hpp"
 #include "utils/memory.hpp"
+#include "utils/utils_extended.hpp"
 #ifdef USE_TBB
 #include <tbb/info.h>
 #include <tbb/scalable_allocator.h>
@@ -28,6 +29,7 @@ struct TrainingConfig {
   int epochs = 10;
   size_t batch_size = 32;
   float lr_decay_factor = 0.9f;
+  size_t lr_decay_interval = 5; // in epochs
   int progress_print_interval = 100;
   uint32_t num_threads = 8; // Typical number of P-Cores on laptop CPUs
 };
@@ -58,6 +60,38 @@ void train_classification_model(tnn::Sequential<float> &model,
   arena.execute([&] {
 #endif
     for (int epoch = 0; epoch < config.epochs; ++epoch) {
+      model.set_training(false);
+      test_loader.reset();
+
+      std::cout << "Starting validation..." << std::endl;
+      double val_loss = 0.0;
+      double val_accuracy = 0.0;
+      int val_batches = 0;
+
+      while (test_loader.get_next_batch(batch_data, batch_labels)) {
+        predictions = model.forward(batch_data);
+        predictions.apply_softmax();
+
+        val_loss += model.loss_function()->compute_loss(predictions, batch_labels);
+        val_accuracy += utils::compute_class_accuracy<float>(predictions, batch_labels);
+        ++val_batches;
+      }
+
+      const float avg_val_loss = static_cast<float>(val_loss / val_batches);
+      const float avg_val_accuracy = static_cast<float>(val_accuracy / val_batches);
+
+      if (avg_val_accuracy > best_val_accuracy) {
+        best_val_accuracy = avg_val_accuracy;
+        std::cout << "New best validation accuracy: " << std::fixed << std::setprecision(2)
+                  << best_val_accuracy * 100.0f << "%" << std::endl;
+        try {
+          model.save_to_file("model_snapshots/" + model.name());
+          std::cout << "Model saved to " << "model_snapshots/" + model.name() << std::endl;
+        } catch (const std::exception &e) {
+          std::cerr << "Error saving model: " << e.what() << std::endl;
+        }
+      }
+
       auto epoch_start = std::chrono::high_resolution_clock::now();
 
       model.set_training(true);
@@ -73,7 +107,7 @@ void train_classification_model(tnn::Sequential<float> &model,
         ++num_batches;
 
         predictions = model.forward(batch_data);
-        utils::apply_softmax<float>(predictions);
+        predictions.apply_softmax();
 
         const float loss = model.loss_function()->compute_loss(predictions, batch_labels);
         const float accuracy = utils::compute_class_accuracy<float>(predictions, batch_labels);
@@ -109,26 +143,6 @@ void train_classification_model(tnn::Sequential<float> &model,
       auto epoch_duration =
           std::chrono::duration_cast<std::chrono::milliseconds>(epoch_end - epoch_start);
 
-      model.set_training(false);
-      test_loader.reset();
-
-      std::cout << "Starting validation..." << std::endl;
-      double val_loss = 0.0;
-      double val_accuracy = 0.0;
-      int val_batches = 0;
-
-      while (test_loader.get_next_batch(batch_data, batch_labels)) {
-        predictions = model.forward(batch_data);
-        utils::apply_softmax<float>(predictions);
-
-        val_loss += model.loss_function()->compute_loss(predictions, batch_labels);
-        val_accuracy += utils::compute_class_accuracy<float>(predictions, batch_labels);
-        ++val_batches;
-      }
-
-      const float avg_val_loss = static_cast<float>(val_loss / val_batches);
-      const float avg_val_accuracy = static_cast<float>(val_accuracy / val_batches);
-
       std::cout << std::string(60, '-') << std::endl;
       std::cout << "Epoch " << epoch + 1 << "/" << config.epochs << " completed in "
                 << epoch_duration.count() << "ms" << std::endl;
@@ -140,22 +154,10 @@ void train_classification_model(tnn::Sequential<float> &model,
                 << std::endl;
       std::cout << std::string(60, '=') << std::endl;
 
-      if (avg_val_accuracy > best_val_accuracy) {
-        best_val_accuracy = avg_val_accuracy;
-        std::cout << "New best validation accuracy: " << std::fixed << std::setprecision(2)
-                  << best_val_accuracy * 100.0f << "%" << std::endl;
-        try {
-          model.save_to_file("model_snapshots/" + model.name());
-          std::cout << "Model saved to " << "model_snapshots/" + model.name() << std::endl;
-        } catch (const std::exception &e) {
-          std::cerr << "Error saving model: " << e.what() << std::endl;
-        }
-      }
-
       if (model.is_profiling_enabled()) {
         model.clear_profiling_data();
       }
-      if ((epoch + 1) % config.progress_print_interval == 0) {
+      if ((epoch + 1) % config.lr_decay_interval == 0) {
         const float current_lr = model.optimizer()->get_learning_rate();
         const float new_lr = current_lr * config.lr_decay_factor;
         model.optimizer()->set_learning_rate(new_lr);
@@ -167,10 +169,12 @@ void train_classification_model(tnn::Sequential<float> &model,
         tbb_cleanup();
       }
 
-      std::cout << utils::get_memory_usage_kb() / 1024 << " MB of memory used." << std::endl;
-      if (utils::get_memory_usage_kb() > 1024 * 1024 * 2) { // 2 GB
-        std::cout << "Warning: High memory usage detected." << std::endl;
+      if ((epoch + 1) % 3 == 0) {
+        // re prepare batches to reapply augmentation
+        train_loader.prepare_batches(config.batch_size);
       }
+
+      std::cout << utils::get_memory_usage_kb() / 1024 << " MB of memory used." << std::endl;
     }
 
 #ifdef USE_TBB
