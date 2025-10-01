@@ -38,4 +38,5 @@ float compute_class_accuracy(const Tensor<float> &predictions, const Tensor<floa
 
   return static_cast<float>(total_correct) / static_cast<float>(batch_size);
 }
+
 } // namespace utils
