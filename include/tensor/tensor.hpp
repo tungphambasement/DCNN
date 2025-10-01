@@ -492,28 +492,41 @@ public:
   }
 
   Tensor<T, L> slice_batch(size_t start_batch, size_t end_batch) const {
-    if (end_batch >= batch_size() || start_batch > end_batch) {
+    if (end_batch > batch_size() || start_batch > end_batch) {
       throw std::invalid_argument("Invalid batch slice range");
     }
 
     size_t new_batch_size = end_batch - start_batch + 1;
+    std::vector<size_t> new_shape(shape_, shape_ + dims_);
+    new_shape[0] = new_batch_size;
+    Tensor<T, L> result(new_shape);
 
-    if constexpr (dims_ == 4) {
-      Tensor<T, L> result(new_batch_size, channels(), height(), width());
-      T *result_data = result.data();
-      size_t output_size = channels() * height() * width();
-      for (size_t n = 0; n < new_batch_size; ++n) {
-        for (size_t idx = 0; idx < output_size; ++idx) {
-          size_t batch_idx = start_batch + n;
-          result_data[n * output_size + idx] = this->data_[batch_idx * strides_[0] + idx];
-        }
-      }
-      return result;
-    } else {
-      throw std::runtime_error("Unsupported tensor dimensionality for batch slicing");
-    }
+    T *result_data = result.data();
+    std::copy(&data_[start_batch * strides_[0]], &data_[end_batch * strides_[0]], result_data);
+
+    return result;
   }
 
+  /**
+   * @brief Copy a specific batch from another tensor to this tensor.
+   */
+  void copy_batch(Tensor<T, L> &other, size_t src_batch_idx, size_t dest_batch_idx) const {
+    if (dest_batch_idx >= batch_size() || src_batch_idx >= other.batch_size()) {
+      throw std::invalid_argument("Invalid batch index for copy");
+    }
+
+    std::copy(&other.data_[src_batch_idx * other.strides_[0]],
+              &other.data_[(src_batch_idx + 1) * other.strides_[0]],
+              &data_[dest_batch_idx * strides_[0]]);
+  }
+
+  /**
+   * @brief Slice the tensor along the channel dimension.
+   * @param start_ch Starting channel index (inclusive)
+   * @param end_ch Ending channel index (inclusive)
+   * @return A new tensor containing the sliced channels
+   * Note: Only supports 4D tensors (NCHW layout)
+   */
   Tensor<T, L> slice_channels(size_t start_ch, size_t end_ch) const {
     if (end_ch >= channels() || start_ch > end_ch) {
       throw std::invalid_argument("Invalid channel slice range");
