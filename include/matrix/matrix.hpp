@@ -28,6 +28,7 @@ private:
   size_t rows_, cols_;
   T *data_;
 
+  static constexpr size_t MKL_ALIGNMENT = 64;
   static constexpr size_t AVX2_ALIGNMENT = 32;
 
   T *allocate_aligned(size_t count) {
@@ -37,10 +38,10 @@ private:
     size_t bytes = count * sizeof(T);
 
 #ifdef _WIN32
-    void *ptr = _aligned_malloc(bytes, AVX2_ALIGNMENT);
+    void *ptr = _aligned_malloc(bytes, MKL_ALIGNMENT);
 #else
-    void *ptr = std::aligned_alloc(AVX2_ALIGNMENT, ((bytes + AVX2_ALIGNMENT - 1) / AVX2_ALIGNMENT) *
-                                                       AVX2_ALIGNMENT);
+    void *ptr = std::aligned_alloc(MKL_ALIGNMENT,
+                                   ((bytes + MKL_ALIGNMENT - 1) / MKL_ALIGNMENT) * MKL_ALIGNMENT);
 #endif
     if (!ptr) {
       throw std::bad_alloc();

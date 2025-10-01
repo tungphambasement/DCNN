@@ -41,7 +41,7 @@
 #include <immintrin.h>
 #endif
 
-enum ALIGNMENT_TYPE { AVX2 = 32, DEFAULT = 16 };
+enum ALIGNMENT_TYPE { MKL = 64, AVX2 = 32, DEFAULT = 16 };
 
 /**
  * @brief A tensor class dedicated for ML and DL applications.
@@ -78,7 +78,7 @@ private:
     if (count == 0)
       return nullptr;
 
-    constexpr size_t alignment = ALIGNMENT_TYPE::AVX2;
+    constexpr size_t alignment = ALIGNMENT_TYPE::MKL;
     size_t byte_size = count * sizeof(T);
     size_t aligned_size = ((byte_size + alignment - 1) / alignment) * alignment;
 
