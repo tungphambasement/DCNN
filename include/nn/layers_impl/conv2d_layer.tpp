@@ -10,6 +10,7 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "math/gemm.hpp"
 #include "utils/ops.hpp"
 #include "utils/parallel_for.hpp"
 
@@ -74,6 +75,8 @@ Tensor<T> Conv2DLayer<T>::forward(const Tensor<T> &input, size_t micro_batch_id)
   size_t output_size = batch_size * output_h * output_w;
 
   T *output_flat = (T *)aligned_alloc(32, sizeof(T) * out_channels_ * output_size);
+  // Initialize output_flat to zero since sgemm accumulates
+  std::fill_n(output_flat, out_channels_ * output_size, T(0));
   compute_conv_forward(col_matrix.data(), weights_.data(), output_flat, output_size, kernel_size,
                        out_channels_);
 
@@ -167,22 +170,7 @@ void Conv2DLayer<T>::compute_conv_forward(const T *col_data, const T *weight_dat
       weight_data, col_data, output_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
 #else
-  // Fallback to custom SIMD implementation
-  T *col_data_transposed = (T *)aligned_alloc(32, sizeof(T) * kernel_size * output_size);
-  utils::transpose_2d(col_data, col_data_transposed, kernel_size, output_size);
-  // transpose and do inner product because yes
-  if (kernel_size % 4 == 0) {
-    utils::parallel_for_2d(out_channels, output_size, [&](size_t oc, size_t os) {
-      output_data[oc * output_size + os] = utils::simd_dot_product_aligned(
-          &weight_data[oc * kernel_size], &col_data_transposed[os * kernel_size], kernel_size);
-    });
-  } else {
-    utils::parallel_for_2d(out_channels, output_size, [&](size_t oc, size_t os) {
-      output_data[oc * output_size + os] = utils::simd_dot_product(
-          &weight_data[oc * kernel_size], &col_data_transposed[os * kernel_size], kernel_size);
-    });
-  }
-  free(col_data_transposed);
+  tmath::sgemm(weight_data, col_data, output_data, out_channels, output_size, kernel_size);
 #endif
 }
 

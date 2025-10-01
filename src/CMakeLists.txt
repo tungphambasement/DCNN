@@ -67,6 +67,13 @@ target_include_directories(dcnn_data_loading PUBLIC
 )
 target_link_libraries(dcnn_data_loading PUBLIC dcnn_utils dcnn_tensor dcnn_matrix)
 
+add_library(dcnn_math STATIC math.cpp)
+target_include_directories(dcnn_utils PUBLIC 
+    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(dcnn_math PUBLIC dcnn_utils)
+
 add_library(dcnn_nn STATIC nn.cpp)
 target_include_directories(dcnn_nn PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
@@ -121,7 +128,7 @@ if(EXISTS "${PROTO_DIR}")
 endif()
 
 add_library(dcnn_instantiations INTERFACE)
-target_link_libraries(dcnn_instantiations INTERFACE dcnn_pipeline dcnn_nn dcnn_data_loading dcnn_tensor dcnn_matrix dcnn_utils)
+target_link_libraries(dcnn_instantiations INTERFACE dcnn_pipeline dcnn_nn dcnn_data_loading dcnn_math dcnn_tensor dcnn_matrix dcnn_utils)
 
 add_library(dcnn_lib INTERFACE)
 target_include_directories(dcnn_lib INTERFACE
@@ -143,7 +150,7 @@ if(WIN32)
     endif()
 endif()
 
-set(INSTANTIATION_LIBS dcnn_matrix dcnn_tensor dcnn_nn dcnn_utils)
+set(INSTANTIATION_LIBS dcnn_matrix dcnn_tensor dcnn_nn dcnn_utils dcnn_math)
 
 if(ENABLE_OPENMP)
     foreach(lib ${INSTANTIATION_LIBS})
