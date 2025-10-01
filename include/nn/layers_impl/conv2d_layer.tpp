@@ -184,19 +184,8 @@ void Conv2DLayer<T>::compute_weight_gradients(const T *col_data, const T *gradie
       gradient_data, col_data, weight_grad_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
 #else
-  // Fallback to custom SIMD implementation
-  // no need for transpose since we are summing over output size
-  if (output_size % 4 == 0) {
-    utils::parallel_for_2d(out_channels, kernel_size, [&](size_t oc, size_t ks) {
-      weight_grad_data[oc * kernel_size + ks] += utils::simd_dot_product_aligned(
-          &gradient_data[oc * output_size], &col_data[ks * output_size], output_size);
-    });
-  } else {
-    utils::parallel_for_2d(out_channels, kernel_size, [&](size_t oc, size_t ks) {
-      weight_grad_data[oc * kernel_size + ks] += utils::simd_dot_product(
-          &gradient_data[oc * output_size], &col_data[ks * output_size], output_size);
-    });
-  }
+  tmath::sgemm(gradient_data, col_data, weight_grad_data, out_channels, kernel_size, output_size,
+               false, true);
 #endif
 }
 
@@ -210,29 +199,9 @@ void Conv2DLayer<T>::compute_input_gradients(const T *gradient_data, const T *we
       weight_data, gradient_data, col_grad_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
 #else
-  // Fallback to custom SIMD implementation
-  T *gradient_transposed = (T *)aligned_alloc(32, sizeof(T) * output_size * out_channels);
-  utils::transpose_2d(gradient_data, gradient_transposed, out_channels, output_size);
-
-  T *weights_transposed = (T *)aligned_alloc(32, sizeof(T) * kernel_size * out_channels);
-  utils::transpose_2d(weight_data, weights_transposed, out_channels, kernel_size);
-
-  if (kernel_size % 4 == 0) {
-    utils::parallel_for_2d(kernel_size, output_size, [&](size_t ks, size_t os) {
-      col_grad_data[ks * output_size + os] =
-          utils::simd_dot_product_aligned(&weights_transposed[ks * out_channels],
-                                          &gradient_transposed[os * out_channels], out_channels);
-    });
-  } else {
-    utils::parallel_for_2d(kernel_size, output_size, [&](size_t ks, size_t os) {
-      col_grad_data[ks * output_size + os] =
-          utils::simd_dot_product(&weights_transposed[ks * out_channels],
-                                  &gradient_transposed[os * out_channels], out_channels);
-    });
-  }
-
-  free(gradient_transposed);
-  free(weights_transposed);
+  std::fill_n(col_grad_data, kernel_size * output_size, T(0));
+  tmath::sgemm(weight_data, gradient_data, col_grad_data, kernel_size, output_size, out_channels,
+               true, false);
 #endif
 }
 

@@ -30,6 +30,7 @@ show_help() {
     echo "  -v, --verbose       Enable verbose build output"
     echo "  --tbb               Enable Intel TBB support (on by default)"
     echo "  --openmp            Enable OpenMP support"
+    echo "  --mkl               Enable Intel MKL support (off by default)"
     echo ""
     echo "Examples:"
     echo "  $0                  # Build with default settings"
@@ -65,6 +66,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --openmp)
             ENABLE_OPENMP=ON #if we want both openmp and tbb
+            shift
+            ;;
+        --mkl)
+            ENABLE_MKL=ON
             shift
             ;;
         *)
