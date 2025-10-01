@@ -37,6 +37,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ENABLE_OPENMP "Enable OpenMP support" OFF)
 option(ENABLE_CUDA "Enable CUDA support" OFF)
 option(ENABLE_TBB "Enable Intel TBB support" ON)
+option(ENABLE_MKL "Enable Intel MKL support" OFF)
 option(ENABLE_DEBUG "Enable debug build with sanitizers" OFF)
 
 # default to release
@@ -89,6 +90,73 @@ if(ENABLE_TBB)
     message("Finding TBB")
     find_package(TBB CONFIG REQUIRED)
     add_compile_definitions(USE_TBB)
+endif()
+
+if(ENABLE_MKL)
+    message("Finding Intel MKL")
+    # Try to find MKL using different methods
+    set(MKL_ARCH intel64)
+    set(MKL_LINK dynamic)
+    set(MKL_INTERFACE_FULL intel_lp64)
+    set(MKL_THREADING intel_thread)
+    
+    # First try the official Intel MKL CMake config
+    find_package(MKL CONFIG QUIET)
+    
+    if(NOT MKL_FOUND)
+        # Fallback: try to find MKL manually
+        find_path(MKL_INCLUDE_DIR
+            NAMES mkl.h
+            PATHS
+                $ENV{MKLROOT}/include
+                /opt/intel/oneapi/mkl/latest/include
+                /opt/intel/mkl/include
+                /usr/include/mkl
+        )
+        
+        find_library(MKL_CORE_LIBRARY
+            NAMES mkl_core
+            PATHS
+                $ENV{MKLROOT}/lib/intel64
+                /opt/intel/oneapi/mkl/latest/lib/intel64
+                /opt/intel/mkl/lib/intel64
+                /usr/lib/x86_64-linux-gnu
+        )
+        
+        find_library(MKL_INTEL_LP64_LIBRARY
+            NAMES mkl_intel_lp64
+            PATHS
+                $ENV{MKLROOT}/lib/intel64
+                /opt/intel/oneapi/mkl/latest/lib/intel64
+                /opt/intel/mkl/lib/intel64
+                /usr/lib/x86_64-linux-gnu
+        )
+        
+        find_library(MKL_INTEL_THREAD_LIBRARY
+            NAMES mkl_intel_thread
+            PATHS
+                $ENV{MKLROOT}/lib/intel64
+                /opt/intel/oneapi/mkl/latest/lib/intel64
+                /opt/intel/mkl/lib/intel64
+                /usr/lib/x86_64-linux-gnu
+        )
+        
+        if(MKL_INCLUDE_DIR AND MKL_CORE_LIBRARY AND MKL_INTEL_LP64_LIBRARY AND MKL_INTEL_THREAD_LIBRARY)
+            set(MKL_FOUND TRUE)
+            set(MKL_LIBRARIES ${MKL_INTEL_LP64_LIBRARY} ${MKL_INTEL_THREAD_LIBRARY} ${MKL_CORE_LIBRARY})
+            set(MKL_INCLUDE_DIRS ${MKL_INCLUDE_DIR})
+            message(STATUS "Found Intel MKL manually")
+            message(STATUS "MKL Include: ${MKL_INCLUDE_DIRS}")
+            message(STATUS "MKL Libraries: ${MKL_LIBRARIES}")
+        endif()
+    endif()
+    
+    if(MKL_FOUND)
+        add_compile_definitions(USE_MKL)
+        message(STATUS "Intel MKL enabled")
+    else()
+        message(FATAL_ERROR "Intel MKL requested but not found. Please install Intel MKL or set MKLROOT environment variable.")
+    endif()
 endif()
 
 if(ENABLE_CUDA)
@@ -169,6 +237,17 @@ function(create_executable target_name source_file)
     
     if(ENABLE_TBB)
         target_link_libraries(${target_name} PRIVATE TBB::tbb)
+    endif()
+    
+    if(ENABLE_MKL)
+        if(TARGET MKL::MKL)
+            target_link_libraries(${target_name} PRIVATE MKL::MKL)
+        else()
+            target_include_directories(${target_name} PRIVATE ${MKL_INCLUDE_DIRS})
+            target_link_libraries(${target_name} PRIVATE ${MKL_LIBRARIES})
+            # Add Intel OpenMP for MKL threading
+            target_link_libraries(${target_name} PRIVATE iomp5 pthread m dl)
+        endif()
     endif()
     
     if(WIN32)

@@ -13,6 +13,10 @@
 #include "utils/ops.hpp"
 #include "utils/parallel_for.hpp"
 
+#ifdef USE_MKL
+#include "utils/mkl_utils.hpp"
+#endif
+
 #ifdef USE_TBB
 #include <tbb/blocked_range2d.h>
 #include <tbb/parallel_for.h>
@@ -158,6 +162,16 @@ template <typename T>
 void Conv2DLayer<T>::compute_conv_forward(const T *col_data, const T *weight_data, T *output_data,
                                           const size_t output_size, const size_t kernel_size,
                                           const size_t out_channels) const {
+#ifdef USE_MKL
+  // Use Intel MKL GEMM for optimized matrix multiplication
+  // weights: [out_channels x kernel_size]
+  // col_data: [kernel_size x output_size]
+  // output: [out_channels x output_size]
+  utils::mkl::conv_forward_gemm(
+      weight_data, col_data, output_data, static_cast<MKL_INT>(out_channels),
+      static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
+#else
+  // Fallback to custom SIMD implementation
   T *col_data_transposed = (T *)aligned_alloc(32, sizeof(T) * kernel_size * output_size);
   utils::transpose_2d(col_data, col_data_transposed, kernel_size, output_size);
   // transpose and do inner product because yes
@@ -173,6 +187,7 @@ void Conv2DLayer<T>::compute_conv_forward(const T *col_data, const T *weight_dat
     });
   }
   free(col_data_transposed);
+#endif
 }
 
 template <typename T>
@@ -180,6 +195,16 @@ void Conv2DLayer<T>::compute_weight_gradients(const T *col_data, const T *gradie
                                               T *weight_grad_data, const size_t output_size,
                                               const size_t kernel_size,
                                               const size_t out_channels) const {
+#ifdef USE_MKL
+  // Use Intel MKL GEMM for optimized weight gradient computation
+  // gradient_data: [out_channels x output_size]
+  // col_data: [kernel_size x output_size]
+  // weight_grad: [out_channels x kernel_size]
+  utils::mkl::conv_weight_grad_gemm(
+      gradient_data, col_data, weight_grad_data, static_cast<MKL_INT>(out_channels),
+      static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
+#else
+  // Fallback to custom SIMD implementation
   // no need for transpose since we are summing over output size
   if (output_size % 4 == 0) {
     utils::parallel_for_2d(out_channels, kernel_size, [&](size_t oc, size_t ks) {
@@ -192,6 +217,7 @@ void Conv2DLayer<T>::compute_weight_gradients(const T *col_data, const T *gradie
           &gradient_data[oc * output_size], &col_data[ks * output_size], output_size);
     });
   }
+#endif
 }
 
 template <typename T>
@@ -199,6 +225,16 @@ void Conv2DLayer<T>::compute_input_gradients(const T *gradient_data, const T *we
                                              T *col_grad_data, const size_t output_size,
                                              const size_t kernel_size,
                                              const size_t out_channels) const {
+#ifdef USE_MKL
+  // Use Intel MKL GEMM for optimized input gradient computation
+  // weights: [out_channels x kernel_size]
+  // gradient_data: [out_channels x output_size]
+  // col_grad: [kernel_size x output_size]
+  utils::mkl::conv_input_grad_gemm(
+      weight_data, gradient_data, col_grad_data, static_cast<MKL_INT>(out_channels),
+      static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
+#else
+  // Fallback to custom SIMD implementation
   T *gradient_transposed = (T *)aligned_alloc(32, sizeof(T) * output_size * out_channels);
   utils::transpose_2d(gradient_data, gradient_transposed, out_channels, output_size);
 
@@ -221,6 +257,7 @@ void Conv2DLayer<T>::compute_input_gradients(const T *gradient_data, const T *we
 
   free(gradient_transposed);
   free(weights_transposed);
+#endif
 }
 
 template <typename T>

@@ -16,6 +16,10 @@
 #include <tbb/task_arena.h>
 #endif
 
+#ifdef USE_MKL
+#include <mkl.h>
+#endif
+
 #ifdef USE_TBB
 void tbb_cleanup() {
   // Clean all buffers
@@ -132,6 +136,11 @@ void train_classification_model(tnn::Sequential<float> &model,
   std::cout << "Validation batches: " << test_loader.num_batches() << std::endl;
 
   std::vector<size_t> image_shape = train_loader.get_image_shape();
+
+#ifdef USE_MKL
+  std::cout << "Setting MKL number of threads to: " << 8 << std::endl;
+  mkl_set_num_threads(8);
+#endif
 
   model.print_summary({config.batch_size, image_shape[0], image_shape[1], image_shape[2]});
 
