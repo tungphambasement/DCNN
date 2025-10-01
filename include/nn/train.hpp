@@ -139,7 +139,7 @@ void train_classification_model(tnn::Sequential<float> &model,
 
 #ifdef USE_MKL
   std::cout << "Setting MKL number of threads to: " << 8 << std::endl;
-  mkl_set_num_threads(8);
+  mkl_set_threading_layer(MKL_THREADING_TBB);
 #endif
 
   model.print_summary({config.batch_size, image_shape[0], image_shape[1], image_shape[2]});

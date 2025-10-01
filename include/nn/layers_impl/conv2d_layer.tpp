@@ -163,10 +163,6 @@ void Conv2DLayer<T>::compute_conv_forward(const T *col_data, const T *weight_dat
                                           const size_t output_size, const size_t kernel_size,
                                           const size_t out_channels) const {
 #ifdef USE_MKL
-  // Use Intel MKL GEMM for optimized matrix multiplication
-  // weights: [out_channels x kernel_size]
-  // col_data: [kernel_size x output_size]
-  // output: [out_channels x output_size]
   utils::mkl::conv_forward_gemm(
       weight_data, col_data, output_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
@@ -196,10 +192,6 @@ void Conv2DLayer<T>::compute_weight_gradients(const T *col_data, const T *gradie
                                               const size_t kernel_size,
                                               const size_t out_channels) const {
 #ifdef USE_MKL
-  // Use Intel MKL GEMM for optimized weight gradient computation
-  // gradient_data: [out_channels x output_size]
-  // col_data: [kernel_size x output_size]
-  // weight_grad: [out_channels x kernel_size]
   utils::mkl::conv_weight_grad_gemm(
       gradient_data, col_data, weight_grad_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));
@@ -226,10 +218,6 @@ void Conv2DLayer<T>::compute_input_gradients(const T *gradient_data, const T *we
                                              const size_t kernel_size,
                                              const size_t out_channels) const {
 #ifdef USE_MKL
-  // Use Intel MKL GEMM for optimized input gradient computation
-  // weights: [out_channels x kernel_size]
-  // gradient_data: [out_channels x output_size]
-  // col_grad: [kernel_size x output_size]
   utils::mkl::conv_input_grad_gemm(
       weight_data, gradient_data, col_grad_data, static_cast<MKL_INT>(out_channels),
       static_cast<MKL_INT>(kernel_size), static_cast<MKL_INT>(output_size));

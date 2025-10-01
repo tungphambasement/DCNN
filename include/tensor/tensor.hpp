@@ -233,6 +233,32 @@ public:
     return result;
   }
 
+  Tensor<T, L> operator*(const Tensor<T, L> &other) const {
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for element-wise multiplication");
+    }
+
+    std::vector<size_t> shape_vec(shape_, shape_ + dims_);
+    Tensor<T, L> result(shape_vec);
+
+    utils::avx2_mul(data_, other.data_, result.data_, data_size_);
+
+    return result;
+  }
+
+  Tensor<T, L> operator/(const Tensor<T, L> &other) const {
+    if (!same_shape(other)) {
+      throw std::invalid_argument("Tensor shapes must match for element-wise division");
+    }
+
+    std::vector<size_t> shape_vec(shape_, shape_ + dims_);
+    Tensor<T, L> result(shape_vec);
+
+    utils::avx2_div(data_, other.data_, result.data_, data_size_);
+
+    return result;
+  }
+
   Tensor<T, L> operator*(T scalar) const {
     std::vector<size_t> shape_vec(shape_, shape_ + dims_);
     Tensor<T, L> result(shape_vec);
@@ -401,22 +427,49 @@ public:
     const size_t height_ = height();
     const size_t width_ = width();
 
-    Tensor<T, L> result(batch_size_, channels_, height_ + 2 * pad_h, width_ + 2 * pad_w);
-
-    if (value != T(0))
-      result.fill(value);
+    Tensor<T, L> result(batch_size_, channels_, height_ + 2 * pad_h, width_ + 2 * pad_w, nullptr);
 
     const T *input_data = this->data();
     T *result_data = result.data();
 
     utils::parallel_for_2d(batch_size_, channels_, [&](size_t n, size_t c) {
+      const size_t padded_height = height_ + 2 * pad_h;
+      const size_t padded_width = width_ + 2 * pad_w;
+      // fill top padding rows
+      for (size_t h = 0; h < pad_h; ++h) {
+        std::fill(&result_data[((n * channels_ + c) * padded_height + h) * padded_width],
+                  &result_data[((n * channels_ + c) * padded_height + h) * padded_width] +
+                      padded_width,
+                  value);
+      }
+
+      // Copy middle rows with left and right padding
       for (size_t h = 0; h < height_; ++h) {
         const size_t new_h = h + pad_h;
-        std::copy(&input_data[((n * channels_ + c) * height_ + h) * width_],
-                  &input_data[((n * channels_ + c) * height_ + h) * width_] + width_,
-                  &result_data[((n * channels_ + c) * (height_ + 2 * pad_h) + new_h) *
-                                   (width_ + 2 * pad_w) +
-                               pad_w]);
+        // copy the row over
+        std::copy(
+            &input_data[((n * channels_ + c) * height_ + h) * width_],
+            &input_data[((n * channels_ + c) * height_ + h) * width_] + width_,
+            &result_data[((n * channels_ + c) * padded_height + new_h) * padded_width + pad_w]);
+
+        // set values on left and right
+        std::fill(
+            &result_data[((n * channels_ + c) * padded_height + new_h) * padded_width],
+            &result_data[((n * channels_ + c) * padded_height + new_h) * padded_width + pad_w],
+            value);
+        std::fill(&result_data[((n * channels_ + c) * padded_height + new_h) * padded_width +
+                               pad_w + width_],
+                  &result_data[((n * channels_ + c) * padded_height + new_h) * padded_width +
+                               padded_width],
+                  value);
+      }
+
+      // fill bottom padding rows
+      for (size_t h = height_ + pad_h; h < padded_height; ++h) {
+        std::fill(&result_data[((n * channels_ + c) * padded_height + h) * padded_width],
+                  &result_data[((n * channels_ + c) * padded_height + h) * padded_width] +
+                      padded_width,
+                  value);
       }
     });
 

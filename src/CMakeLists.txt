@@ -1,4 +1,3 @@
-# DCNN Library Components
 
 add_library(dcnn_matrix STATIC matrix.cpp)
 target_include_directories(dcnn_matrix PUBLIC 
@@ -165,4 +164,21 @@ if(ENABLE_CUDA)
         target_link_libraries(${lib} PUBLIC CUDA::cudart CUDA::cublas CUDA::curand)
     endforeach()
     target_link_libraries(dcnn_lib INTERFACE CUDA::cudart CUDA::cublas CUDA::curand)
+endif()
+
+if(ENABLE_MKL)
+    foreach(lib ${INSTANTIATION_LIBS})
+        if(TARGET MKL::MKL)
+            target_link_libraries(${lib} PUBLIC MKL::MKL)
+        else()
+            target_include_directories(${lib} PUBLIC ${MKL_INCLUDE_DIRS})
+            target_link_libraries(${lib} PUBLIC ${MKL_LIBRARIES})
+        endif()
+    endforeach()
+    
+    if(TARGET MKL::MKL)
+        target_link_libraries(dcnn_lib INTERFACE MKL::MKL)
+    else()
+        target_link_libraries(dcnn_lib INTERFACE ${MKL_LIBRARIES})
+    endif()
 endif()
