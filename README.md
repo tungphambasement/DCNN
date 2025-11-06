@@ -1,3 +1,4 @@
+# NOTE: This is an old version of TNN library, for the most up-to-date versions, see my [TNN](https://github.com/tungphambasement/TNN) repository
 # Getting Started
 
 ## Dependencies
